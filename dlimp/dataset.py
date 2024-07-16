@@ -130,18 +130,18 @@ class DLataset(tf.data.Dataset):
         split: str = "train",
         shuffle: bool = True,
         num_parallel_reads: int = tf.data.AUTOTUNE,
-    ) -> "DLataset":
-        """Creates a DLataset from the RLDS format (which is a special case of the TFDS format).
-
-        Args:
-            builder (DatasetBuilder): The TFDS dataset builder to load the dataset from.
-            data_dir (str): The directory to load the dataset from.
-            split (str, optional): The split to load, specified in TFDS format. Defaults to "train".
-            shuffle (bool, optional): Whether to shuffle the dataset. Defaults to True.
-            num_parallel_reads (int, optional): The number of tfrecord files to read in parallel. Defaults to AUTOTUNE. This
-                can use an excessive amount of memory if reading from cloud storage; decrease if necessary.
-        """
-        dataset = _wrap(builder.as_dataset, False)(
+    ) -> tf.data.Dataset:
+        # dataset = _wrap(builder.as_dataset, False)(
+        #     split=split,
+        #     shuffle_files=shuffle,
+        #     decoders={"steps": tfds.decode.SkipDecoding()},
+        #     read_config=tfds.ReadConfig(
+        #         skip_prefetch=True,
+        #         num_parallel_calls_for_interleave_files=num_parallel_reads,
+        #         interleave_cycle_length=num_parallel_reads,
+        #     ),
+        # )._apply_options()
+        dataset: tf.data.Dataset = builder.as_dataset(
             split=split,
             shuffle_files=shuffle,
             decoders={"steps": tfds.decode.SkipDecoding()},
@@ -150,9 +150,19 @@ class DLataset(tf.data.Dataset):
                 num_parallel_calls_for_interleave_files=num_parallel_reads,
                 interleave_cycle_length=num_parallel_reads,
             ),
-        )._apply_options()
+        )
 
-        dataset = dataset.enumerate().traj_map(_broadcast_metadata_rlds)
+        options = tf.data.Options()
+        options.autotune.enabled = True
+        options.deterministic = False
+        options.experimental_optimization.apply_default_optimizations = True
+        options.experimental_optimization.map_fusion = True
+        options.experimental_optimization.map_and_filter_fusion = True
+        options.experimental_optimization.inject_prefetch = False
+        options.experimental_warm_start = True
+        dataset.with_options(options)
+
+        dataset = dataset.enumerate().map(_broadcast_metadata_rlds, num_parallel_calls=tf.data.AUTOTUNE)
 
         return dataset
 
@@ -222,15 +232,22 @@ class DLataset(tf.data.Dataset):
 
     @staticmethod
     def sample_from_datasets(
-        datasets,
+        datasets: tf.data.Dataset,
         weights=None,
         seed=None,
         stop_on_empty_dataset=False,
         rerandomize_each_iteration=None,
-    ):
-        if not isinstance(datasets[0], DLataset):
-            raise ValueError("Please pass DLatasets to sample_from_datasets.")
-        return _wrap(tf.data.Dataset.sample_from_datasets, datasets[0].is_flattened)(
+    ) -> tf.data.Dataset:
+        # if not isinstance(datasets[0], DLataset):
+        #     raise ValueError("Please pass DLatasets to sample_from_datasets.")
+        # return _wrap(tf.data.Dataset.sample_from_datasets, datasets[0].is_flattened)(
+        #     datasets,
+        #     weights=weights,
+        #     seed=seed,
+        #     stop_on_empty_dataset=stop_on_empty_dataset,
+        #     rerandomize_each_iteration=rerandomize_each_iteration,
+        # )
+        return tf.data.Dataset.sample_from_datasets(
             datasets,
             weights=weights,
             seed=seed,
